@@ -46,18 +46,10 @@ namespace engine.UT {
       arr=t0.children.ToArray();
       Assert.AreEqual(3, arr.Length);
       arr=t0.all.ToArray();
-      Assert.AreEqual(7, arr.Length);  // ch_a, ch_b/a, ch_b/b, ch_b, ch_c/a, ch_c, child
-      Assert.AreEqual(t2, arr[4]);
+      Assert.AreEqual(7, arr.Length);  // child, ch_a, ch_b, ch_b/a, ch_b/b, ch_c, ch_c/a
+      Assert.AreEqual(t2, arr[6]);
       Assert.AreEqual(t1, arr[5]);
-      Assert.AreEqual(t0, arr[6]);
-      arr=t0.Find("#/a").ToArray();
-      Assert.AreEqual(7, arr.Length);  // ch_a, ch_b/a, ch_b/b, ch_b, ch_c/a, ch_c, child
-      Assert.AreEqual(t2, arr[4]);
-      Assert.AreEqual(t1, arr[5]);
-      Assert.AreEqual(t0, arr[6]);
-      arr=t0.Find("+/a").ToArray();    // ch_b/a, ch_c/a
-      Assert.AreEqual(2, arr.Length);
-      Assert.AreEqual(t2, arr[1]);
+      Assert.AreEqual(t0, arr[0]);
     }
     [TestMethod]
     public void Exist() {
@@ -70,53 +62,54 @@ namespace engine.UT {
       Assert.AreEqual(t1, t2);
     }
     [TestMethod]
-    public void Subsribe() {
-      m1Topics=new List<Topic>();
-      Topic t;
-      t=tr["subs/a/a/a"];
-      t=tr["subs/a/a/b"];
-      t=tr["subs/a/a/c"];
-      t=tr["subs/a/b"];
-      t=tr["subs/b"];
-      t=tr["subs/c/a/a"];
-      t=tr["subs/c/b/a"];
-
-      var s=tr.Subscribe("subs/a/+/a", m1);
-      Assert.AreEqual("/test/subs/a/+/a", s.ToString());
-      Assert.AreEqual(1, m1Topics.Count);
-      Assert.IsTrue(s.Check(new string[] { "d", "a" }));
-      Assert.IsFalse(s.Check(new string[] { "a", "A" }));
-      Assert.IsFalse(s.Check(new string[] { "a", "#" }));
-      Assert.IsTrue(s.Check(tr["subs/a/a/a"].path));
-      Assert.IsFalse(s.Check(tr["subs/a/a/b"].path));
-
-      m1Topics.Clear();
-      s=tr.Subscribe("subs/a/b/a", m1);
-      Assert.AreEqual("/test/subs/a/b/a", s.ToString());
-      Assert.AreEqual(0, m1Topics.Count);
-
-      m1Topics.Clear();
-      s=tr.Subscribe("subs/c/#", m1);
-      Assert.AreEqual("/test/subs/c/#", s.ToString());
-      Assert.AreEqual(5, m1Topics.Count);
-      Assert.IsTrue(s.Check(new string[0]));
-      Assert.IsTrue(s.Check(new string[] { "a", "A" }));
-      Assert.IsTrue(s.Check(tr["subs/c/a/a"].path));
-      Assert.IsFalse(s.Check(tr["subs/b"].path));
-
-      m1Topics.Clear();
+    public void ReqData() {
+      Topic.RequestContext=ReqCtx;
+      var t1=Topic.root["test/req"];
+      var t1_ch=t1.children.ToArray();
+      Assert.AreEqual(t1_ch.Length, 2);
+      Assert.AreEqual(t1_ch[0].path, "/test/req/a");
+      Assert.AreEqual(t1_ch[1].parent, t1);
+      Assert.AreEqual(t1_ch[1].name, "b");
+      t1_ch=t1.all.ToArray();
+      Assert.AreEqual(t1_ch.Length, 4);
+      Assert.AreEqual(t1_ch[0].path, "/test/req");
+      Assert.AreEqual(t1_ch[1].parent, t1);
+      Assert.AreEqual(t1_ch[2].name, "c");
+      t1_ch=t1.all.ToArray();
+      Topic.RequestContext=null;
     }
-    List<Topic> m1Topics;
-    private void m1(Topic t, EventArgs a) {
-      m1Topics.Add(t);
+    SortedList<string, string> ReqCtx(string mask, bool sync) {
+      Log.Debug("ReqCtx({0}, {1})", mask, sync);
+      SortedList<string,string> ret=new SortedList<string,string>();
+      switch(mask) {
+      case "/test/req":
+        ret["/test/req"]="\"Hello World!!!\"";
+        break;
+      case "/test/req/+":
+        ret["/test/req/a"]="1";
+        ret["/test/req/b"]="true";
+        break;
+      case "/test/req/#":
+        ret["/test/req"]="\"Hello World!!!\"";
+        ret["/test/req/a"]="1";
+        ret["/test/req/a/c"]="3.1415";
+        ret["/test/req/b"]="true";
+        break;
+      }
+      return ret;
+    }
+    [TestMethod]
+    [ExpectedException(typeof(ArgumentException))]
+    public void TopicGetWithWildcard() {
+      var t=Topic.root["/test/#"];
     }
     [TestMethod]
     public void Value_long() {
       Topic t=Topic.root["/test/long"];
       t.value=1L;
-      Assert.AreEqual<long?>(1L, t);
-      Assert.AreEqual<bool?>(true, t);
-      Assert.AreEqual<double?>(1.0, t);
+      Assert.AreEqual<long>(1L, t);
+      Assert.AreEqual<bool>(true, t);
+      Assert.AreEqual<double>(1.0, t);
       Assert.AreEqual<string>(1L.ToString(), t);
       Assert.AreEqual(1L, t.value);
     }
@@ -124,9 +117,9 @@ namespace engine.UT {
     public void Value_bool() {
       Topic t=Topic.root["/test/bool"];
       t.value=false;
-      Assert.AreEqual<long?>(0, t);
-      Assert.AreEqual<bool?>(false, t);
-      Assert.AreEqual<double?>(0.0, t);
+      Assert.AreEqual<long>(0, t);
+      Assert.AreEqual<bool>(false, t);
+      Assert.AreEqual<double>(0.0, t);
       Assert.AreEqual<string>(false.ToString(), t);
       Assert.AreEqual(false, t.value);
     }
@@ -134,9 +127,9 @@ namespace engine.UT {
     public void Value_double() {
       Topic t=Topic.root["/test/double"];
       t.value=3.14;
-      Assert.AreEqual<long?>(3L, t);
-      Assert.AreEqual<bool?>(true, t);
-      Assert.AreEqual<double?>(3.14, t);
+      Assert.AreEqual<long>(3L, t);
+      Assert.AreEqual<bool>(true, t);
+      Assert.AreEqual<double>(3.14, t);
       Assert.AreEqual<string>(3.14.ToString(), t);
       Assert.AreEqual(3.14, t.value);
     }
@@ -145,9 +138,21 @@ namespace engine.UT {
       Topic t=Topic.root["/test/string/true"];
       string val=true.ToString();
       t.value=val;
-      Assert.AreEqual<long?>(null, t);
-      Assert.AreEqual<bool?>(true, t);
-      Assert.AreEqual<double?>(null, t);
+      try {
+        long t_l=t;
+        Assert.Fail("strTrue -> long");
+      }
+      catch(Exception ex) {
+        Assert.IsTrue(ex is Exception);
+      }
+      Assert.AreEqual<bool>(true, t);
+      try {
+        double t_l=t;
+        Assert.Fail("strTrue -> double");
+      }
+      catch(Exception ex) {
+        Assert.IsTrue(ex is Exception);
+      }
       Assert.AreEqual<string>(val, t);
       Assert.AreEqual(val, t.value);
     }
@@ -155,9 +160,15 @@ namespace engine.UT {
     public void Value_strInt() {
       Topic t=Topic.root["/test/string/int"];
       t.value="42";
-      Assert.AreEqual<long?>(42L, t);
-      Assert.AreEqual<bool?>(null, t);
-      Assert.AreEqual<double?>(42.0, t);
+      Assert.AreEqual<long>(42L, t);
+      try {
+        bool t_l=t;
+        Assert.Fail("strInt -> bool");
+      }
+      catch(Exception ex) {
+        Assert.IsTrue(ex is Exception);
+      }
+      Assert.AreEqual<double>(42.0, t);
       Assert.AreEqual<string>("42", t);
       Assert.AreEqual("42", t.value);
     }
@@ -166,9 +177,21 @@ namespace engine.UT {
       Topic t=Topic.root["/test/string/double"];
       string val=7.91.ToString();
       t.value=val;
-      Assert.AreEqual<long?>(null, t);
-      Assert.AreEqual<bool?>(null, t);
-      Assert.AreEqual<double?>(7.91, t);
+      try {
+        long t_l=t;
+        Assert.Fail("strFloat -> long");
+      }
+      catch(Exception ex) {
+        Assert.IsTrue(ex is Exception);
+      }
+      try {
+        bool t_l=t;
+        Assert.Fail("strFloat -> bool");
+      }
+      catch(Exception ex) {
+        Assert.IsTrue(ex is Exception);
+      }
+      Assert.AreEqual<double>(7.91, t);
       Assert.AreEqual<string>(val, t);
       Assert.AreEqual(val, t.value);
     }
@@ -177,9 +200,27 @@ namespace engine.UT {
       Topic t=Topic.root["/test/string"];
       string val="Hello";
       t.value=val;
-      Assert.AreEqual<long?>(null, t);
-      Assert.AreEqual<bool?>(null, t);
-      Assert.AreEqual<double?>(null, t);
+      try {
+        long t_l=t;
+        Assert.Fail("strAlpha -> long");
+      }
+      catch(Exception ex) {
+        Assert.IsTrue(ex is Exception);
+      }
+      try {
+        bool t_l=t;
+        Assert.Fail("strAlpha -> bool");
+      }
+      catch(Exception ex) {
+        Assert.IsTrue(ex is Exception);
+      }
+      try {
+        double t_l=t;
+        Assert.Fail("strAlpha -> double");
+      }
+      catch(Exception ex) {
+        Assert.IsTrue(ex is Exception);
+      }
       Assert.AreEqual<string>(val, t);
       Assert.AreEqual(val, t.value);
     }
