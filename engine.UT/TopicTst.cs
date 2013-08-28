@@ -8,9 +8,14 @@ namespace engine.UT {
   [TestClass]
   public class TopicTst {
     private Topic tr;
+    private List<Topic> cbData;
     [TestInitialize]
     public void Initialize() {
       tr=Topic.root["/test"];
+      cbData=new List<Topic>();
+      //Topic.RequestContext=ReqCtx;
+      //Topic.root["test/req"].all.ToArray();
+      //Topic.RequestContext=null;
     }
 
     [TestMethod]
@@ -66,15 +71,19 @@ namespace engine.UT {
       Topic.RequestContext=ReqCtx;
       var t1=Topic.root["test/req"];
       var t1_ch=t1.children.ToArray();
-      Assert.AreEqual(t1_ch.Length, 2);
-      Assert.AreEqual(t1_ch[0].path, "/test/req/a");
-      Assert.AreEqual(t1_ch[1].parent, t1);
-      Assert.AreEqual(t1_ch[1].name, "b");
-      t1_ch=t1.all.ToArray();
-      Assert.AreEqual(t1_ch.Length, 4);
-      Assert.AreEqual(t1_ch[0].path, "/test/req");
-      Assert.AreEqual(t1_ch[1].parent, t1);
-      Assert.AreEqual(t1_ch[2].name, "c");
+      Assert.AreEqual(2, t1_ch.Length);
+      Assert.AreEqual("/test/req/a", t1_ch[0].path);
+      Assert.AreEqual(t1, t1_ch[1].parent);
+      Assert.AreEqual("b", t1_ch[1].name);
+      t1_ch=t1.all.ToArray();       // /test/rq, /test/req/a, /test/req/a/c, /test/req/b
+      Assert.AreEqual(4, t1_ch.Length);
+      Assert.AreEqual(t1, t1_ch[0]);
+      Assert.AreEqual(t1, t1_ch[1].parent);
+      Assert.AreEqual("c", t1_ch[2].name);
+      Assert.AreEqual("Hello World!!!", t1_ch[0].value);
+      Assert.AreEqual(1L, t1_ch[1].value);
+      Assert.AreEqual(3.1415, t1_ch[2].value);
+      Assert.AreEqual(true, t1_ch[3].value);
       t1_ch=t1.all.ToArray();
       Topic.RequestContext=null;
     }
@@ -104,9 +113,24 @@ namespace engine.UT {
       var t=Topic.root["/test/#"];
     }
     [TestMethod]
+    public void SubscribeTopic() {
+      Topic.RequestContext=ReqCtx;
+      var t1=Topic.root["test/req"];
+      cbData.Clear();
+      t1.changed+=TopicChanged;
+      Assert.AreEqual(1, cbData.Count);
+      Assert.AreEqual(t1, cbData[0]);
+
+      Topic.RequestContext=null;
+    }
+    private void TopicChanged(Topic src, Topic.TopicArgs arg) {
+      cbData.Add(src);
+    }
+    [TestMethod]
     public void Value_long() {
       Topic t=Topic.root["/test/long"];
       t.value=1L;
+      Topic.Process();
       Assert.AreEqual<long>(1L, t);
       Assert.AreEqual<bool>(true, t);
       Assert.AreEqual<double>(1.0, t);
@@ -117,6 +141,7 @@ namespace engine.UT {
     public void Value_bool() {
       Topic t=Topic.root["/test/bool"];
       t.value=false;
+      Topic.Process();
       Assert.AreEqual<long>(0, t);
       Assert.AreEqual<bool>(false, t);
       Assert.AreEqual<double>(0.0, t);
@@ -127,6 +152,7 @@ namespace engine.UT {
     public void Value_double() {
       Topic t=Topic.root["/test/double"];
       t.value=3.14;
+      Topic.Process();
       Assert.AreEqual<long>(3L, t);
       Assert.AreEqual<bool>(true, t);
       Assert.AreEqual<double>(3.14, t);
@@ -138,6 +164,7 @@ namespace engine.UT {
       Topic t=Topic.root["/test/string/true"];
       string val=true.ToString();
       t.value=val;
+      Topic.Process();
       try {
         long t_l=t;
         Assert.Fail("strTrue -> long");
@@ -160,6 +187,7 @@ namespace engine.UT {
     public void Value_strInt() {
       Topic t=Topic.root["/test/string/int"];
       t.value="42";
+      Topic.Process();
       Assert.AreEqual<long>(42L, t);
       try {
         bool t_l=t;
@@ -177,6 +205,7 @@ namespace engine.UT {
       Topic t=Topic.root["/test/string/double"];
       string val=7.91.ToString();
       t.value=val;
+      Topic.Process();
       try {
         long t_l=t;
         Assert.Fail("strFloat -> long");
@@ -200,6 +229,7 @@ namespace engine.UT {
       Topic t=Topic.root["/test/string"];
       string val="Hello";
       t.value=val;
+      Topic.Process();
       try {
         long t_l=t;
         Assert.Fail("strAlpha -> long");
@@ -223,6 +253,17 @@ namespace engine.UT {
       }
       Assert.AreEqual<string>(val, t);
       Assert.AreEqual(val, t.value);
+    }
+    [TestMethod]
+    public void ProcessValue() {
+      Topic t=Topic.root["/test/long"];
+      t.value=1L;
+      Topic.Process();
+      Assert.AreEqual<long>(1L, t);
+      t.value=2L;
+      Assert.AreEqual<long>(1L, t);
+      Topic.Process();
+      Assert.AreEqual<long>(2L, t);
     }
   }
 }

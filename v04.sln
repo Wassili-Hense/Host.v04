@@ -4,6 +4,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "engine", "engine\engine.csproj", "{C893F27C-D9C0-4A7B-8D88-F1050D3780E9}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "bin", "bin", "{780EF7E3-AF84-42E0-9013-CFFA0E26362D}"
+	ProjectSection(SolutionItems) = preProject
+		bin\Newtonsoft.Json.dll = bin\Newtonsoft.Json.dll
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "engine.UT", "engine.UT\engine.UT.csproj", "{DA63882D-C9BD-400D-ABA4-2EE32ED4E0F1}"
 EndProject
