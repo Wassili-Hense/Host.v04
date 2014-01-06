@@ -10,12 +10,16 @@ namespace X13 {
       ps.Open();
       Topic root=Topic.root;
       root.saved=true;
+      //root.value="LMNOPQRSTUVWXYZ";
       root.value="XYZ";
       ps.Save(root);
       Topic l1=root.Get("level1_a");
       l1.saved=true;
-      l1.value="123456789ABCDEFGHI";
-      ps.Save(l1);
+      l1.value="123456789ABCDEFGH";
+      //l1.value="123456789";
+      //ps.Save(l1);
+      Console.WriteLine("press Enter");
+      Console.ReadLine();
       ps.Close();
     }
   }
