@@ -6,13 +6,16 @@ using System.IO;
 
 namespace X13 {
   public class PersistentStorage {
-    private const uint FL_SAVED    =0x01000000;
-    private const uint FL_LOCAL    =0x02000000;
-    private const uint FL_EMBEDDED =0x04000000;
+    /// <summary>data stored in this record</summary>
+    private const uint FL_SAVED_I  =0x01000000;
+    /// <summary>data stored as a separate record</summary>
+    private const uint FL_SAVED_E  =0x02000000;
+    private const uint FL_SAVED_A  =0x07000000;
+    private const uint FL_LOCAL    =0x08000000;
     private const uint FL_RECORD   =0x40000000;
     private const uint FL_REMOVED  =0x80000000;
-    private const int FL_REC_LEN  =0x00FFFFFF;
-    private const int FL_DATA_LEN =0x3FFFFFFF;
+    private const int FL_REC_LEN   =0x00FFFFFF;
+    private const int FL_DATA_LEN  =0x3FFFFFFF;
 
     private Dictionary<Topic, Record> _tr;
     private List<FRec> _free;
@@ -30,8 +33,13 @@ namespace X13 {
       } else {
         Read();
       }
+      Topic.root.all.changed+=TopicChanged;
     }
-    public void Save(Topic t) {
+
+    private void TopicChanged(Topic t, Topic.TopicArgs p) {
+      Save(t);
+    }
+    private void Save(Topic t) {
       Record rec;
       uint parentPos, oldFl_Size;
       int oldDataSize;
@@ -61,30 +69,30 @@ namespace X13 {
           rec.name=t.name;
           recModified=true;
         }
-        rec.saved=t.saved;
         rec.fl_size=FL_RECORD | (uint)(14+Encoding.UTF8.GetByteCount(rec.name));
         if(t.saved) {
-          if(rec.data!=t.value) {
-            rec.data=t.value; // t.ToJson()
+          if(rec.data!=t.GetJson()) {
+            rec.data=t.GetJson();
             dataModified=true;
           }
           rec.data_size=(rec.data==null?0:Encoding.UTF8.GetByteCount(rec.data));
           if(rec.data_size>0 && rec.data_size<16) {
-            rec.fl_size=(rec.fl_size+(uint)rec.data_size) | FL_SAVED | FL_EMBEDDED;
+            rec.fl_size=(rec.fl_size+(uint)rec.data_size) | FL_SAVED_I;
           } else {
-            rec.fl_size|=FL_SAVED;
+            rec.fl_size|=FL_SAVED_E;
           }
         } else {
           rec.data=null;
           rec.data_size=0;
+          rec.saved=0;
           if(oldDataSize>0) {
             dataModified=true;
           }
         }
       }
       byte[] recBuf=new byte[rec.size];
-      if(rec.saved && rec.data!=null) {
-        if(rec.embedded) {
+      if(rec.saved!=0 && rec.data!=null) {
+        if(rec.saved==FL_SAVED_I) {
           CopyBytes(rec.data_size, recBuf, 8);
           Encoding.UTF8.GetBytes(rec.data).CopyTo(recBuf, recBuf.Length-rec.data_size-2);
           if(rec.data_pos>0 && oldDataSize>0) {
@@ -99,9 +107,7 @@ namespace X13 {
             byte[] dataBuf=new byte[6+rec.data_size];
             CopyBytes(dataBuf.Length, dataBuf, 0);
             Encoding.UTF8.GetBytes(rec.data).CopyTo(dataBuf, 4);
-            uint tmp=rec.data_pos;
-            Write(ref rec.data_pos, dataBuf, oldDataSize);
-            if(tmp!=rec.data_pos) {
+            if(Write(ref rec.data_pos, dataBuf, oldDataSize)) {
               recModified=true;
             }
           }
@@ -116,9 +122,7 @@ namespace X13 {
         CopyBytes(rec.fl_size, recBuf, 0);
         CopyBytes(rec.parent, recBuf, 4);
         Encoding.UTF8.GetBytes(rec.name).CopyTo(recBuf, 12);
-        uint tmp=rec.pos;
-        Write(ref rec.pos, recBuf, (int)oldFl_Size & FL_REC_LEN);
-        if(tmp!=rec.pos) {
+        if(Write(ref rec.pos, recBuf, (int)oldFl_Size & FL_REC_LEN)) {
           var ch=t.children.ToArray();
           for(int i=ch.Length-1; i>=0; i--) {
             Save(ch[i]);
@@ -126,8 +130,9 @@ namespace X13 {
         }
       }
     }
-    private void Write(ref uint pos, byte[] buf, int oldSize) {
+    private bool Write(ref uint pos, byte[] buf, int oldSize) {
       oldSize=((oldSize+7)&0x7FFFFFF8);
+      uint oldPos=pos;
       CopyBytes(Crc16.ComputeChecksum(buf, buf.Length-2), buf, buf.Length-2);
       if(((buf.Length+7)&0x00FFFFF8)!=oldSize) {
         if(pos>0) {
@@ -137,9 +142,10 @@ namespace X13 {
       }
       _file.Position=(long)pos<<3;
       _file.Write(buf, 0, buf.Length);
-
+      return pos!=oldPos;
     }
     public void Close() {
+      Topic.root.all.changed-=TopicChanged;
       _file.Close();
     }
     private void Read() {
@@ -169,7 +175,7 @@ namespace X13 {
           var r=new Record((uint)(curPos>>3), buf);
 
           if(r.parent==0) {
-            if(r.name=="ROOT") {
+            if(r.name=="/") {
               t=Topic.root;
             } else {
               t=null;
@@ -177,7 +183,7 @@ namespace X13 {
           } else if(r.parent<r.pos) {
             t=_tr.FirstOrDefault(z => z.Value.pos==r.parent).Key;
             if(t!=null) {
-              t=t.Get(r.name);
+              t=t.Get(r.name, null);
             }
           } else {
             t=null;
@@ -194,9 +200,9 @@ namespace X13 {
       _refitParent=null;
     }
     private void AddTopic(Topic t, Record r) {
-      if(r.saved) {
+      if(r.saved!=0) {
         t.saved=true;
-        if(!r.embedded) {
+        if(r.saved==FL_SAVED_E) {
           byte[] lBuf=new byte[4];
           _file.Position=(long)r.data_pos<<3;
           _file.Read(lBuf, 0, 4);
@@ -214,7 +220,7 @@ namespace X13 {
             r.data=Encoding.UTF8.GetString(buf, 4, (int)r.data_size);
           }
         }
-        t.value=r.data;
+        t.SetJson(r.data);
       }
       Console.WriteLine("{0}={1} [0x{2:X4}]", t.path, t.value, r.pos);
       _tr[t]=r;
@@ -222,7 +228,7 @@ namespace X13 {
       while(idx>=0 && idx<_refitParent.Count && _refitParent[idx].parent==r.pos) {
         Record nextR=_refitParent[idx];
         _refitParent.RemoveAt(idx);
-        AddTopic(t.Get(nextR.name), nextR);
+        AddTopic(t.Get(nextR.name, null), nextR);
         idx=indexPPos(_refitParent, r.pos);
       }
     }
@@ -345,7 +351,7 @@ namespace X13 {
         parent=BitConverter.ToUInt32(buf, 4);
         uint dataPS=BitConverter.ToUInt32(buf, 8);
         if(dataPS>0) {
-          if((fl_size&FL_EMBEDDED)!=0) {
+          if((fl_size&FL_SAVED_A)==FL_SAVED_I) {
             data_pos=0;
             data_size=(int)dataPS;
             data=Encoding.UTF8.GetString(buf, (int)(buf.Length-data_size-2), (int)(data_size));
@@ -368,21 +374,20 @@ namespace X13 {
         name=t.name;
         fl_size=FL_RECORD | (uint)(14+Encoding.UTF8.GetByteCount(name));
         if(t.saved) {
-          data=t.value; // t.ToJson()
+          data=t.GetJson();
           data_size=(data==null?0:Encoding.UTF8.GetByteCount(data));
           if(data_size>0 && data_size<16) {
-            fl_size=(fl_size+(uint)data_size) | FL_SAVED | FL_EMBEDDED;
+            fl_size=(fl_size+(uint)data_size) | FL_SAVED_I;
           } else {
-            fl_size|=FL_SAVED;
+            fl_size|=FL_SAVED_E;
           }
         } else {
           data=null;
           data_size=0;
         }
       }
-      public bool saved { get { return (fl_size&FL_SAVED)!=0; } set { fl_size=value?fl_size|FL_SAVED:fl_size&~FL_SAVED; } }
+      public uint saved { get { return fl_size&FL_SAVED_A; } set { fl_size=(fl_size & ~FL_SAVED_A) | (value & FL_SAVED_A); } }
       public bool local { get { return (fl_size&FL_LOCAL)!=0; } set { fl_size=value?fl_size|FL_LOCAL : fl_size&~FL_LOCAL; } }
-      public bool embedded { get { return (fl_size&FL_EMBEDDED)!=0; } set { fl_size=value?fl_size|FL_EMBEDDED:fl_size&~FL_EMBEDDED; } }
       public bool removed { get { return (fl_size&FL_REMOVED)!=0; } set { fl_size=value?fl_size|FL_REMOVED:fl_size&~FL_REMOVED; } }
       public int size { get { return (int)fl_size & FL_REC_LEN; } }
     }

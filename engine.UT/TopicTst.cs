@@ -75,7 +75,7 @@ namespace engine.UT {
       Assert.AreEqual("/test/req/a", t1_ch[0].path);
       Assert.AreEqual(t1, t1_ch[1].parent);
       Assert.AreEqual("b", t1_ch[1].name);
-      t1_ch=t1.all.ToArray();       // /test/rq, /test/req/a, /test/req/a/c, /test/req/b
+      t1_ch=t1.all.ToArray();       // /test/req, /test/req/a, /test/req/a/c, /test/req/b
       Assert.AreEqual(4, t1_ch.Length);
       Assert.AreEqual(t1, t1_ch[0]);
       Assert.AreEqual(t1, t1_ch[1].parent);

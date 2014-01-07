@@ -49,7 +49,6 @@ namespace X13 {
           if(tv.Key.parent!=null) {
             tv.Key.parent._children.Remove(tv.Key.name);
           }
-
         }
       }
       _prOp.Clear();
@@ -64,15 +63,18 @@ namespace X13 {
     private string _name;
     private string _path;
     private MaskType _flags;
+    private string _json;
     #endregion variables
 
     private Topic(Topic parent, string name) {
       _name=name;
       _parent=parent;
-      if(parent!=null) {
+      if(parent==null) {
+        _path="/";
+      } else if(parent==root) {
+        _path="/"+name;
+      }else{
         _path=parent.path+"/"+name;
-      } else {
-        _path=string.Empty;
       }
       _subs=new List<Tuple<MaskType, Action<Topic, TopicArgs>>>();
     }
@@ -95,6 +97,14 @@ namespace X13 {
     public object value {
       get { return _value; }
       set { _prIp[this]=value; }
+    }
+    [Browsable(false)]
+    public bool saved {
+      get { return (_flags & MaskType.saved)==MaskType.saved; }
+      set { 
+        _flags=(_flags&~MaskType.saved)|(value?MaskType.saved:MaskType.None);
+        _prIp[this]=_value;
+      }
     }
     [Category("Location"), DisplayName("Name")]
     public string name {
@@ -142,7 +152,7 @@ namespace X13 {
     /// <param name="path">relative or absolute path</param>
     /// <param name="create">true - ReqData & create, false - ReqData, null - create</param>
     /// <returns>item or null</returns>
-    private Topic Get(string path, bool? create) {
+    internal Topic Get(string path, bool? create) {
       if(string.IsNullOrEmpty(path)) {
         return this;
       }
@@ -263,12 +273,12 @@ namespace X13 {
         }
       } else {
         for(Topic cur=this; cur!=null; cur=cur._parent) {
-          for(int i=0; i<_subs.Count; i++) {
-            func=_subs[i].Item2;
+          for(int i=0; i<cur._subs.Count; i++) {
+            func=cur._subs[i].Item2;
             if(func!=null 
-              && (((_subs[i].Item1 & MaskType.all)==MaskType.all)
-                || (cur==this && (_subs[i].Item1 & MaskType.value)==MaskType.value)
-                || (cur==this.parent && (_subs[i].Item1 & MaskType.children)==MaskType.children))) {
+              && (((cur._subs[i].Item1 & MaskType.all)==MaskType.all)
+                || (cur==this && (cur._subs[i].Item1 & MaskType.value)==MaskType.value)
+                || (cur==this.parent && (cur._subs[i].Item1 & MaskType.children)==MaskType.children))) {
               try {
                 func(this, null);
               }
@@ -281,7 +291,7 @@ namespace X13 {
 
       }
     }
-    private void SetJson(string json) {
+    internal void SetJson(string json) {
       bool ch=false;
       object tmp=null;
       if(string.IsNullOrWhiteSpace(json)) {
@@ -345,6 +355,82 @@ namespace X13 {
         _flags|=MaskType.changed;
       }
     }
+    internal string GetJson() {
+      if(_json==null) {
+        lock(this) {
+          if(_json==null) {
+            try {
+              Type valueType=_value==null?null:_value.GetType();
+              if(valueType==null) {
+                _json="null";
+              } else if(Type.GetTypeCode(valueType)!=TypeCode.Object) {
+                if(valueType.IsEnum) {
+                  _json=(new JObject(
+                    new JProperty("v", JsonConvert.SerializeObject(_value)),
+                    new JProperty("+", valueType.FullName))).ToString();
+                } else if(valueType==typeof(string) && string.IsNullOrEmpty((string)_value)) {
+                  _json="\"\"";
+                } else {
+                  _json=JsonConvert.SerializeObject(_value, _jcs);
+                }
+              } else if(valueType==typeof(Topic)) {
+                Topic link=this._value as Topic;
+                if(link==null) {
+                  _json=(new JObject(new JProperty("+", "Topic"))).ToString();
+                } else {
+                  string sPath=link.path;
+                  Stack<Topic> mPath=new Stack<Topic>();
+                  Topic cur=this;
+                  do {
+                    mPath.Push(cur);
+                  } while((cur=cur.parent)!=root);
+                  Stack<Topic> lPath=new Stack<Topic>();
+                  cur=link;
+                  do {
+                    lPath.Push(cur);
+                  } while((cur=cur.parent)!=root);
+                  while(mPath.Peek()==lPath.Peek()) {
+                    mPath.Pop();
+                    lPath.Pop();
+                  }
+                  if(mPath.Count<3) {
+                    StringBuilder sb=new StringBuilder();
+                    for(int i=mPath.Count-1; i>=0; i--) {
+                      sb.Append("../");
+                    }
+                    while(lPath.Count>0) {
+                      if(lPath.Count>1) {
+                        sb.AppendFormat("{0}/", lPath.Pop().name);
+                      } else {
+                        sb.AppendFormat(lPath.Pop().name);
+                      }
+                    }
+                    sPath=sb.ToString();
+                  }
+                  _json=(new JObject(
+                    new JProperty("p", sPath),
+                    new JProperty("+", "Topic"))).ToString();
+                }
+              } else {
+                JObject o;
+                if(valueType==typeof(JObject)) {
+                  o=_value as JObject;
+                } else {
+                  o=JObject.FromObject(_value);
+                  o["+"]=valueType.FullName;
+                }
+                _json=o.ToString();
+              }
+
+            }
+            catch(Exception ex) {
+              Log.Error("{0}.ToJson() val={1}, err={2}", this.path, _value, ex.Message);
+            }
+          }
+        }
+      }
+      return _json;
+    }
     private void SetValue(object v) {
       if(!object.Equals(v, _value)) {
         ITenant tt;
@@ -352,6 +438,7 @@ namespace X13 {
           tt.owner=null;
         }
         _value=v;
+        _json=null;
         _flags|=MaskType.changed;
       }
     }
@@ -378,11 +465,13 @@ namespace X13 {
     #region nested types
     [Flags]
     private enum MaskType {
+      None=0,
       value=1,
       children=2,
       all=4,
       changed=8,
       remove=16,
+      saved=32,
     }
 
     public class Bill : IEnumerable<Topic> {
