@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Threading;
 
 namespace X13 {
   public class PersistentStorage {
@@ -21,10 +22,16 @@ namespace X13 {
     private List<FRec> _free;
     private FileStream _file;
     private List<Record> _refitParent;
+    private ManualResetEvent _fileOp;
+    private LinkedList<Tuple<long, byte[]>> _toSave;
+    private long _fileLength;
+    private bool _terminate;
 
     public PersistentStorage() {
-      _tr=new Dictionary<Topic, Record>(4096);
-      _free=new List<FRec>(1024);
+      _tr=new Dictionary<Topic, Record>();
+      _free=new List<FRec>();
+      _toSave=new LinkedList<Tuple<long, byte[]>>();
+      _fileOp=new ManualResetEvent(false);
     }
     public void Open() {
       _file=new FileStream("data.dat", FileMode.OpenOrCreate, FileAccess.ReadWrite);
@@ -33,9 +40,97 @@ namespace X13 {
       } else {
         Read();
       }
+      _fileLength=_file.Length;
+      ThreadPool.QueueUserWorkItem(FileOperations);
+
       Topic.root.all.changed+=TopicChanged;
     }
-
+    private void FileOperations(object o) {
+      Tuple<long, byte[]> val;
+      bool signal;
+      while(!_terminate) {
+        try {
+          _fileOp.Reset();
+          signal=_fileOp.WaitOne(1500);
+        }
+        catch(Exception ex) {
+          Log.Debug("PersistentStorage.FileOperations terminated - "+ex.Message);
+          break;
+        }
+        try {
+          if(!signal) {
+            lock(_free) {
+              _fileLength=_file.Length;
+              for(int i=_free.Count-1; i>=0; i--) {
+                if((((long)_free[i].pos<<3)+((_free[i].size+7)&0x7FFFFFF8))>=_fileLength) {
+                  _fileLength=(long)_free[i].pos<<3;
+                  _free.RemoveAt(i);
+                  break;
+                }
+              }
+            }
+            if(_fileLength<_file.Length) {
+              _file.SetLength(_fileLength);
+            }
+          } else {
+            Thread.Sleep(60);
+            while(true) {
+              lock(_toSave) {
+                if(_toSave.First==null) {
+                  val=null;
+                } else {
+                  val=_toSave.First.Value;
+                  _toSave.RemoveFirst();
+                }
+              }
+              if(val==null) {
+                break;
+              } else {
+                _file.Position=val.Item1;
+                _file.Write(val.Item2, 0, val.Item2.Length);
+              }
+            }
+            _file.Flush(true);
+          }
+        }
+        catch(Exception ex) {
+          Log.Warning("PersistentStorage.FileOperations exception - "+ex.ToString());
+        }
+      }
+      _terminate=false;
+    }
+    private void ToSave(long pos, byte[] buf) {
+      if(buf==null || buf.Length<4) {
+        throw new ArgumentException("buf");
+      }
+      var val=new Tuple<long, byte[]>(pos, buf);
+      lock(_toSave) {
+        var cur=_toSave.Last;
+        if(cur!=null && (buf[3]&(byte)(FL_REMOVED>>24))==0) {
+          while(cur!=null && (cur.Value.Item2[3]&(byte)(FL_REMOVED>>24))!=0) {
+            if(cur.Value.Item1==pos) {
+              cur=cur.Previous;
+              _toSave.Remove(cur.Next);
+            } else {
+              cur=cur.Previous;
+            }
+          }
+        }
+        if(cur==null) {
+          _toSave.AddFirst(val);
+        } else {
+          _toSave.AddAfter(cur, val);
+          while(cur!=null) {
+            if(cur.Value.Item1==pos) {
+              _toSave.Remove(cur);
+              break;
+            }
+            cur=cur.Previous;
+          }
+        }
+      }
+      _fileOp.Set();
+    }
     private void TopicChanged(Topic t, Topic.TopicArgs p) {
       Save(t);
     }
@@ -140,12 +235,17 @@ namespace X13 {
         }
         pos=FindFree(buf.Length);
       }
-      _file.Position=(long)pos<<3;
-      _file.Write(buf, 0, buf.Length);
+      ToSave((long)pos<<3, buf);
       return pos!=oldPos;
     }
     public void Close() {
       Topic.root.all.changed-=TopicChanged;
+      _terminate=true;
+      _fileOp.Set();
+      int i=120;
+      while(_terminate && i-->0) {
+        Thread.Sleep(100);
+      }
       _file.Close();
     }
     private void Read() {
@@ -256,52 +356,51 @@ namespace X13 {
     }
     private void AddFree(uint pos, int size) {
       if(((uint)size & FL_REMOVED)==0) {
-        if(((long)pos<<3)+((size+7)&0x7FFFFFF8)>=_file.Length) {
-          _file.SetLength((long)pos<<3);
-          return;
-        }
-        byte[] buf=BitConverter.GetBytes((uint)size | FL_REMOVED);
-        _file.Position=(long)pos<<3;
-        _file.Write(buf, 0, 4);
+        ToSave((long)pos<<3, BitConverter.GetBytes(((uint)size+7)&0x7FFFFFF8 | FL_REMOVED));
       }
-      FRec fr=new FRec(pos, (size+7)&0x7FFFFFF8);
-      int idx=_free.BinarySearch(fr);
-      idx=idx<0?~idx:idx+1;
-      _free.Insert(idx, fr);
+      lock(_free) {
+        FRec fr=new FRec(pos, (size+7)&0x7FFFFFF8);
+        int idx=_free.BinarySearch(fr);
+        idx=idx<0?~idx:idx+1;
+        _free.Insert(idx, fr);
+      }
     }
     private uint FindFree(int size) {
       size=(size+7)&0x7FFFFFF8;
       uint rez;
-      int min=0, mid=-1, max=_free.Count-1;
+      lock(_free) {
+        int min=0, mid=-1, max=_free.Count-1;
 
-      while(min<=max) {
-        mid = (min + max) / 2;
-        if(_free[mid].size < size) {
-          min = mid + 1;
-        } else if(_free[mid].size > size) {
-          max = mid - 1;
-          mid = max;
+        while(min<=max) {
+          mid = (min + max) / 2;
+          if(_free[mid].size < size) {
+            min = mid + 1;
+          } else if(_free[mid].size > size) {
+            max = mid - 1;
+            mid = max;
+          } else {
+            break;
+          }
+        }
+        if(mid>=0) {
+          max=_free.Count-1;
+          while(mid<max && _free[mid+1].size <= size) {
+            mid++;
+          }
+        }
+        if(mid>=0 && mid<=max && _free[mid].size>=size) {
+          var fr=_free[mid];
+          _free.RemoveAt(mid);
+          if(fr.size==size) {
+            rez=fr.pos;
+          } else {
+            AddFree(fr.pos, fr.size-size);
+            rez=(uint)(fr.pos+fr.size-size);
+          }
         } else {
-          break;
+          rez=(uint)((_fileLength+7)>>3);
+          _fileLength=((long)rez<<3)+size;
         }
-      }
-      if(mid>=0) {
-        max=_free.Count-1;
-        while(mid<max && _free[mid+1].size <= size) {
-          mid++;
-        }
-      }
-      if(mid>=0 && mid<=max && _free[mid].size>=size) {
-        var fr=_free[mid];
-        _free.RemoveAt(mid);
-        if(fr.size==size) {
-          rez=fr.pos;
-        } else {
-          AddFree(fr.pos, fr.size-size);
-          rez=(uint)(fr.pos+fr.size-size);
-        }
-      } else {
-        rez=(uint)((_file.Length+7)>>3);
       }
       return rez;
     }

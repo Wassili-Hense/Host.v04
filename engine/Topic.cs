@@ -77,6 +77,7 @@ namespace X13 {
         _path=parent.path+"/"+name;
       }
       _subs=new List<Tuple<MaskType, Action<Topic, TopicArgs>>>();
+      saved=true;
     }
 
     public event Action<Topic, TopicArgs> changed {
@@ -192,7 +193,7 @@ namespace X13 {
       return home;
     }
     /// <summary>Request data from client</summary>
-    /// <param name="name">null - get value, "+" - get children, "#" - get all or name of topic</param>
+    /// <param name="name">null - get current, name of topic, "+" - get children, "#" - get all</param>
     /// <param name="sync">wait answer</param>
     private void ReqData(string name, bool sync) {
       if(RequestContext==null) {
