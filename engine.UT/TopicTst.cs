@@ -127,6 +127,20 @@ namespace engine.UT {
       cbData.Add(src);
     }
     [TestMethod]
+    public void Remove() {
+      var t0=tr["TopR"];
+      var t1=t0["0"];
+      t1.Remove();
+      Assert.AreEqual(1, t0.children.Count());
+      Topic.Process();
+      Assert.AreEqual(0, t0.children.Count());
+      t1=t0["1"];
+      t0.Remove();
+      Topic.Process();
+      Assert.AreEqual(0, t0.children.Count());
+      Assert.IsFalse(tr.Exist("TopR"));
+    }
+    [TestMethod]
     public void Value_long() {
       Topic t=Topic.root["/test/long"];
       t.value=1L;

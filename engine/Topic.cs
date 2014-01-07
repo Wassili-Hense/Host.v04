@@ -8,7 +8,7 @@ using System.Text;
 using System.Threading;
 
 namespace X13 {
-  public class Topic {
+  public class Topic : IComparable<Topic> {
     public static readonly Topic root;
     public static Func<string, bool, SortedList<string, string>> RequestContext;
     private static SortedList<Topic, object> _prIp;
@@ -29,7 +29,7 @@ namespace X13 {
       }
       _prOp=Interlocked.Exchange(ref _prIp, _prOp);
       foreach(var tv in _prOp) {
-        tv.Key.SetValue(tv.Value);
+        tv.Key.SetValue((tv.Key._flags & MaskType.remove)==MaskType.remove?null:tv.Value);
       }
       if(RequestContext!=null) {
         var data=RequestContext(string.Empty, false);
@@ -41,6 +41,16 @@ namespace X13 {
       }
       foreach(var tv in _prOp) {
         tv.Key.Publish(null);
+        if((tv.Key._flags & MaskType.remove)==MaskType.remove) {
+          ITenant v;
+          if((v=tv.Key._value as ITenant)!=null) {
+            v.owner=null;
+          }
+          if(tv.Key.parent!=null) {
+            tv.Key.parent._children.Remove(tv.Key.name);
+          }
+
+        }
       }
       _prOp.Clear();
       _busyFlag=1;
@@ -110,13 +120,22 @@ namespace X13 {
       return topic!=null;
     }
     public void Remove() {
-      throw new NotImplementedException();
+      foreach(var t in this.all) {
+        _prIp[t]=null;
+        t._flags|=MaskType.remove;
+      }
     }
     public void Move(Topic nParent, string nName) {
       throw new NotImplementedException();
     }
     public override string ToString() {
       return _path;
+    }
+    public int CompareTo(Topic other) {
+      if(other==null) {
+        return 1;
+      }
+      return string.Compare(this._path, other._path);
     }
 
     /// <summary> Get item from tree</summary>
@@ -363,6 +382,7 @@ namespace X13 {
       children=2,
       all=4,
       changed=8,
+      remove=16,
     }
 
     public class Bill : IEnumerable<Topic> {
