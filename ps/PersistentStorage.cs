@@ -26,6 +26,7 @@ namespace X13 {
     private LinkedList<Tuple<long, byte[]>> _toSave;
     private long _fileLength;
     private bool _terminate;
+    private DateTime _nextBak;
 
     public PersistentStorage() {
       _tr=new Dictionary<Topic, Record>();
@@ -34,16 +35,95 @@ namespace X13 {
       _fileOp=new ManualResetEvent(false);
     }
     public void Open() {
-      _file=new FileStream("data.dat", FileMode.OpenOrCreate, FileAccess.ReadWrite);
+      if(!Directory.Exists("../data")) {
+        Directory.CreateDirectory("../data");
+      }
+      _file=new FileStream("../data/persist.xdb", FileMode.OpenOrCreate, FileAccess.ReadWrite);
       if(_file.Length<0x40) {
         _file.Write(new byte[0x40], 0, 0x40);
       } else {
-        Read();
+        _file.Position=0x40;
+        long curPos;
+        byte[] lBuf=new byte[4];
+        _refitParent=new List<Record>();
+        Topic t;
+
+        do {
+          curPos=_file.Position;
+          _file.Read(lBuf, 0, 4);
+          uint fl_size=BitConverter.ToUInt32(lBuf, 0);
+          int len=(int)fl_size&(((fl_size&FL_RECORD)!=0)?FL_REC_LEN:FL_DATA_LEN);
+
+          if((fl_size & FL_REMOVED)!=0) {
+            AddFree((uint)(curPos>>3), (int)fl_size);
+          } else if((fl_size&FL_RECORD)!=0) {
+            byte[] buf=new byte[len];
+            lBuf.CopyTo(buf, 0);
+            _file.Read(buf, 4, len-4);
+            ushort crc1=BitConverter.ToUInt16(buf, len-2);
+            ushort crc2=Crc16.ComputeChecksum(buf, len-2);
+            if(crc1!=crc2) {
+              throw new ApplicationException("CRC Error Record@0x"+curPos.ToString("X8"));
+            }
+            var r=new Record((uint)(curPos>>3), buf);
+
+            if(r.parent==0) {
+              if(r.name=="/") {
+                t=Topic.root;
+              } else {
+                t=null;
+              }
+            } else if(r.parent<r.pos) {
+              t=_tr.FirstOrDefault(z => z.Value.pos==r.parent).Key;
+              if(t!=null) {
+                t=t.Get(r.name, null);
+              }
+            } else {
+              t=null;
+            }
+            if(t!=null) {
+              AddTopic(t, r);
+            } else {
+              int idx=indexPPos(_refitParent, r.parent);
+              _refitParent.Insert(idx+1, r);
+            }
+          }
+          _file.Position=curPos+((len+7)&0x7FFFFFF8);
+        } while(_file.Position<_file.Length);
+        _refitParent=null;
       }
       _fileLength=_file.Length;
+      Backup();
       ThreadPool.QueueUserWorkItem(FileOperations);
-
       Topic.root.all.changed+=TopicChanged;
+    }
+    public void Close() {
+      Topic.root.all.changed-=TopicChanged;
+      _terminate=true;
+      _fileOp.Set();
+      int i=120;
+      while(_terminate && i-->0) {
+        Thread.Sleep(100);
+      }
+      _file.Close();
+    }
+
+    private void Backup() {
+      DateTime now = DateTime.Now;
+      _nextBak=now.AddDays(1);
+      string fn="../data/"+LongToString(now.Ticks/240000000L)+".bak";  // 24Sec.
+      var bak=new FileStream(fn, FileMode.Create, FileAccess.ReadWrite);
+      _file.Position=0;
+      _file.CopyTo(bak);
+      bak.Close();
+      try {
+        foreach(string f in Directory.GetFiles("../data/", "*.bak", SearchOption.TopDirectoryOnly)) {
+          if(File.GetLastWriteTime(f).AddDays(15)<_nextBak)
+            File.Delete(f);
+        }
+      }
+      catch(System.IO.IOException) {
+      }
     }
     private void FileOperations(object o) {
       Tuple<long, byte[]> val;
@@ -59,6 +139,9 @@ namespace X13 {
         }
         try {
           if(!signal) {
+            if(_nextBak<DateTime.Now) {
+              Backup();
+            }
             lock(_free) {
               _fileLength=_file.Length;
               for(int i=_free.Count-1; i>=0; i--) {
@@ -238,67 +321,6 @@ namespace X13 {
       ToSave((long)pos<<3, buf);
       return pos!=oldPos;
     }
-    public void Close() {
-      Topic.root.all.changed-=TopicChanged;
-      _terminate=true;
-      _fileOp.Set();
-      int i=120;
-      while(_terminate && i-->0) {
-        Thread.Sleep(100);
-      }
-      _file.Close();
-    }
-    private void Read() {
-      _file.Position=0x40;
-      long curPos;
-      byte[] lBuf=new byte[4];
-      _refitParent=new List<Record>();
-      Topic t;
-
-      do {
-        curPos=_file.Position;
-        _file.Read(lBuf, 0, 4);
-        uint fl_size=BitConverter.ToUInt32(lBuf, 0);
-        int len=(int)fl_size&(((fl_size&FL_RECORD)!=0)?FL_REC_LEN:FL_DATA_LEN);
-
-        if((fl_size & FL_REMOVED)!=0) {
-          AddFree((uint)(curPos>>3), (int)fl_size);
-        } else if((fl_size&FL_RECORD)!=0) {
-          byte[] buf=new byte[len];
-          lBuf.CopyTo(buf, 0);
-          _file.Read(buf, 4, (int)len-4);
-          ushort crc1=BitConverter.ToUInt16(buf, (int)(len-2));
-          ushort crc2=Crc16.ComputeChecksum(buf, (int)(len-2));
-          if(crc1!=crc2) {
-            throw new ApplicationException("CRC Error Record@0x"+curPos.ToString("X8"));
-          }
-          var r=new Record((uint)(curPos>>3), buf);
-
-          if(r.parent==0) {
-            if(r.name=="/") {
-              t=Topic.root;
-            } else {
-              t=null;
-            }
-          } else if(r.parent<r.pos) {
-            t=_tr.FirstOrDefault(z => z.Value.pos==r.parent).Key;
-            if(t!=null) {
-              t=t.Get(r.name, null);
-            }
-          } else {
-            t=null;
-          }
-          if(t!=null) {
-            AddTopic(t, r);
-          } else {
-            int idx=indexPPos(_refitParent, r.parent);
-            _refitParent.Insert(idx+1, r);
-          }
-        }
-        _file.Position=curPos+((len+7)&0xFFFFFFF8);
-      } while(_file.Position<_file.Length);
-      _refitParent=null;
-    }
     private void AddTopic(Topic t, Record r) {
       if(r.saved!=0) {
         t.saved=true;
@@ -369,34 +391,14 @@ namespace X13 {
       size=(size+7)&0x7FFFFFF8;
       uint rez;
       lock(_free) {
-        int min=0, mid=-1, max=_free.Count-1;
-
-        while(min<=max) {
-          mid = (min + max) / 2;
-          if(_free[mid].size < size) {
-            min = mid + 1;
-          } else if(_free[mid].size > size) {
-            max = mid - 1;
-            mid = max;
-          } else {
-            break;
-          }
+        int idx=-1;
+        idx=_free.BinarySearch(new FRec(0, size));
+        if(idx<0) {
+          idx=~idx;
         }
-        if(mid>=0) {
-          max=_free.Count-1;
-          while(mid<max && _free[mid+1].size <= size) {
-            mid++;
-          }
-        }
-        if(mid>=0 && mid<=max && _free[mid].size>=size) {
-          var fr=_free[mid];
-          _free.RemoveAt(mid);
-          if(fr.size==size) {
-            rez=fr.pos;
-          } else {
-            AddFree(fr.pos, fr.size-size);
-            rez=(uint)(fr.pos+fr.size-size);
-          }
+        if(idx<_free.Count && _free[idx].size==size) {
+          rez=_free[idx].pos;
+          _free.RemoveAt(idx);
         } else {
           rez=(uint)((_fileLength+7)>>3);
           _fileLength=((long)rez<<3)+size;
@@ -420,17 +422,36 @@ namespace X13 {
       buf[offset++]=(byte)value;
       buf[offset++]=(byte)(value>>8);
     }
+    public static string LongToString(long value, string baseChars=null) {
+      if(string.IsNullOrEmpty(baseChars)) {
+        baseChars="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx";
+      }
+      int i = 64;
+      char[] buffer = new char[i];
+      int targetBase= baseChars.Length;
+
+      do {
+        buffer[--i] = baseChars[(int)(value % targetBase)];
+        value = value / targetBase;
+      }
+      while(value>0);
+
+      char[] result = new char[64 - i];
+      Array.Copy(buffer, i, result, 0, 64 - i);
+
+      return new string(result);
+    }
 
     private struct FRec : IComparable<FRec> {
       private long val;
 
       public FRec(uint pos, int size) {
-        val=((long)size<<32) | (~pos);
+        val=((long)size<<32) | pos;
       }
       public int CompareTo(FRec o) {
         return val.CompareTo(o.val);
       }
-      public uint pos { get { return ~(uint)val; } }
+      public uint pos { get { return (uint)val; } }
       public int size { get { return (int)(val>>32); } }
 
     }
