@@ -8,7 +8,7 @@ using System.Text;
 using System.Threading;
 
 namespace X13 {
-  public class Topic : IComparable<Topic> {
+  public sealed class Topic : IComparable<Topic> {
     public static readonly Topic root;
     public static Func<string, bool, SortedList<string, string>> RequestContext;
     private static SortedList<Topic, object> _prIp;
@@ -77,7 +77,7 @@ namespace X13 {
         _path=parent.path+"/"+name;
       }
       _subs=new List<Tuple<MaskType, Action<Topic, TopicArgs>>>();
-      saved=true;
+      _flags=MaskType.saved;
     }
 
     public event Action<Topic, TopicArgs> changed {
@@ -99,14 +99,6 @@ namespace X13 {
       get { return _value; }
       set { _prIp[this]=value; }
     }
-    [Browsable(false)]
-    public bool saved {
-      get { return (_flags & MaskType.saved)==MaskType.saved; }
-      set { 
-        _flags=(_flags&~MaskType.saved)|(value?MaskType.saved:MaskType.None);
-        _prIp[this]=_value;
-      }
-    }
     [Category("Location"), DisplayName("Name")]
     public string name {
       get { return _name; }
@@ -117,11 +109,12 @@ namespace X13 {
       get { return _path; }
       set { _path=value; }
     }
-    public Topic this[string path] { get { return Get(path, true); } }
     [Browsable(false)]
     public Bill all { get { return new Bill(this, true); } }
     [Browsable(false)]
     public Bill children { get { return new Bill(this, false); } }
+    public bool this[MaskType t] { get { return (_flags & t)==t; } internal set { _flags=value?_flags|t:_flags&~t; } }
+
     public bool Exist(string path) {
       Topic tmp;
       return Exist(path, out tmp);
@@ -132,8 +125,8 @@ namespace X13 {
     }
     public void Remove() {
       foreach(var t in this.all) {
-        _prIp[t]=null;
         t._flags|=MaskType.remove;
+        _prIp[t]=null;
       }
     }
     public void Move(Topic nParent, string nName) {
@@ -153,7 +146,7 @@ namespace X13 {
     /// <param name="path">relative or absolute path</param>
     /// <param name="create">true - ReqData & create, false - ReqData, null - create</param>
     /// <returns>item or null</returns>
-    internal Topic Get(string path, bool? create) {
+    public Topic Get(string path, bool? create=true) {
       if(string.IsNullOrEmpty(path)) {
         return this;
       }
@@ -465,7 +458,7 @@ namespace X13 {
 
     #region nested types
     [Flags]
-    private enum MaskType {
+    public enum MaskType {
       None=0,
       value=1,
       children=2,

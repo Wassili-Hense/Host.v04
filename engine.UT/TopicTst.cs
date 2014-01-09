@@ -11,10 +11,10 @@ namespace engine.UT {
     private List<Topic> cbData;
     [TestInitialize]
     public void Initialize() {
-      tr=Topic.root["/test"];
+      tr=Topic.root.Get("/test");
       cbData=new List<Topic>();
       //Topic.RequestContext=ReqCtx;
-      //Topic.root["test/req"].all.ToArray();
+      //Topic.root.Get("test/req").all.ToArray();
       //Topic.RequestContext=null;
     }
 
@@ -28,26 +28,26 @@ namespace engine.UT {
     }
     [TestMethod]
     public void GetChild() {
-      Topic t1=Topic.root["/test/child"];
-      Topic t2=tr["child"];
+      Topic t1=Topic.root.Get("/test/child");
+      Topic t2=tr.Get("child");
       Assert.AreEqual<Topic>(t1, t2);
-      Topic t3=tr["/test/child"];
+      Topic t3=tr.Get("/test/child");
       Assert.AreEqual<Topic>(t1, t3);
     }
     [TestMethod]
     public void GetChildren() {
-      Topic t0=tr["child"];
+      Topic t0=tr.Get("child");
       var arr=t0.children.ToArray();
       Assert.AreEqual(0, arr.Length);
-      var t1=t0["ch_a"];
+      var t1=t0.Get("ch_a");
       arr=t0.children.ToArray();
       Assert.AreEqual(1, arr.Length);
       Assert.AreEqual(t1, arr[0]);
-      t1=t0["ch_b"];
-      var t2=t1["a"];
-      t2=t1["b"];
-      t1=t0["ch_c"];
-      t2=t1["a"];
+      t1=t0.Get("ch_b");
+      var t2=t1.Get("a");
+      t2=t1.Get("b");
+      t1=t0.Get("ch_c");
+      t2=t1.Get("a");
       arr=t0.children.ToArray();
       Assert.AreEqual(3, arr.Length);
       arr=t0.all.ToArray();
@@ -60,7 +60,7 @@ namespace engine.UT {
     public void Exist() {
       bool rez=Topic.root.Exist("/test/child/d");
       Assert.AreEqual(false, rez);
-      Topic t1=tr["child/a"];
+      Topic t1=tr.Get("child/a");
       Topic t2;
       rez=Topic.root.Exist("/test/child/a", out t2);
       Assert.AreEqual(true, rez);
@@ -69,7 +69,7 @@ namespace engine.UT {
     [TestMethod]
     public void ReqData() {
       Topic.RequestContext=ReqCtx;
-      var t1=Topic.root["test/req"];
+      var t1=Topic.root.Get("test/req");
       var t1_ch=t1.children.ToArray();
       Assert.AreEqual(2, t1_ch.Length);
       Assert.AreEqual("/test/req/a", t1_ch[0].path);
@@ -110,12 +110,12 @@ namespace engine.UT {
     [TestMethod]
     [ExpectedException(typeof(ArgumentException))]
     public void TopicGetWithWildcard() {
-      var t=Topic.root["/test/#"];
+      var t=Topic.root.Get("/test/#");
     }
     [TestMethod]
     public void SubscribeTopic() {
       Topic.RequestContext=ReqCtx;
-      var t1=Topic.root["test/req"];
+      var t1=Topic.root.Get("test/req");
       cbData.Clear();
       t1.changed+=TopicChanged;
       Assert.AreEqual(1, cbData.Count);
@@ -128,13 +128,13 @@ namespace engine.UT {
     }
     [TestMethod]
     public void Remove() {
-      var t0=tr["TopR"];
-      var t1=t0["0"];
+      var t0=tr.Get("TopR");
+      var t1=t0.Get("0");
       t1.Remove();
       Assert.AreEqual(1, t0.children.Count());
       Topic.Process();
       Assert.AreEqual(0, t0.children.Count());
-      t1=t0["1"];
+      t1=t0.Get("1");
       t0.Remove();
       Topic.Process();
       Assert.AreEqual(0, t0.children.Count());
@@ -142,7 +142,7 @@ namespace engine.UT {
     }
     [TestMethod]
     public void Value_long() {
-      Topic t=Topic.root["/test/long"];
+      Topic t=Topic.root.Get("/test/long");
       t.value=1L;
       Topic.Process();
       Assert.AreEqual<long>(1L, t);
@@ -153,7 +153,7 @@ namespace engine.UT {
     }
     [TestMethod]
     public void Value_bool() {
-      Topic t=Topic.root["/test/bool"];
+      Topic t=Topic.root.Get("/test/bool");
       t.value=false;
       Topic.Process();
       Assert.AreEqual<long>(0, t);
@@ -164,7 +164,7 @@ namespace engine.UT {
     }
     [TestMethod]
     public void Value_double() {
-      Topic t=Topic.root["/test/double"];
+      Topic t=Topic.root.Get("/test/double");
       t.value=3.14;
       Topic.Process();
       Assert.AreEqual<long>(3L, t);
@@ -175,7 +175,7 @@ namespace engine.UT {
     }
     [TestMethod]
     public void Value_strTrue() {
-      Topic t=Topic.root["/test/string/true"];
+      Topic t=Topic.root.Get("/test/string/true");
       string val=true.ToString();
       t.value=val;
       Topic.Process();
@@ -199,7 +199,7 @@ namespace engine.UT {
     }
     [TestMethod]
     public void Value_strInt() {
-      Topic t=Topic.root["/test/string/int"];
+      Topic t=Topic.root.Get("/test/string/int");
       t.value="42";
       Topic.Process();
       Assert.AreEqual<long>(42L, t);
@@ -216,7 +216,7 @@ namespace engine.UT {
     }
     [TestMethod]
     public void Value_strFloat() {
-      Topic t=Topic.root["/test/string/double"];
+      Topic t=Topic.root.Get("/test/string/double");
       string val=7.91.ToString();
       t.value=val;
       Topic.Process();
@@ -240,7 +240,7 @@ namespace engine.UT {
     }
     [TestMethod]
     public void Value_strAlpha() {
-      Topic t=Topic.root["/test/string"];
+      Topic t=Topic.root.Get("/test/string");
       string val="Hello";
       t.value=val;
       Topic.Process();
@@ -270,7 +270,7 @@ namespace engine.UT {
     }
     [TestMethod]
     public void ProcessValue() {
-      Topic t=Topic.root["/test/long"];
+      Topic t=Topic.root.Get("/test/long");
       t.value=1L;
       Topic.Process();
       Assert.AreEqual<long>(1L, t);

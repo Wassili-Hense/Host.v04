@@ -111,18 +111,19 @@ namespace X13 {
     private void Backup() {
       DateTime now = DateTime.Now;
       _nextBak=now.AddDays(1);
-      string fn="../data/"+LongToString(now.Ticks/240000000L)+".bak";  // 24Sec.
-      var bak=new FileStream(fn, FileMode.Create, FileAccess.ReadWrite);
-      _file.Position=0;
-      _file.CopyTo(bak);
-      bak.Close();
+      string fn="../data/"+LongToString(now.Ticks*3/2000000000L)+".bak";  // 1/66(6)Sec.
       try {
+        var bak=new FileStream(fn, FileMode.Create, FileAccess.ReadWrite);
+        _file.Position=0;
+        _file.CopyTo(bak);
+        bak.Close();
         foreach(string f in Directory.GetFiles("../data/", "*.bak", SearchOption.TopDirectoryOnly)) {
           if(File.GetLastWriteTime(f).AddDays(15)<_nextBak)
             File.Delete(f);
         }
       }
-      catch(System.IO.IOException) {
+      catch(System.IO.IOException ex) {
+        Log.Warning("PersistentStorage.Backup - "+ex.Message);
       }
     }
     private void FileOperations(object o) {
@@ -221,8 +222,8 @@ namespace X13 {
       Record rec;
       uint parentPos, oldFl_Size;
       int oldDataSize;
-      bool recModified=false, dataModified=false;
-      if(t.parent==null) {
+      bool recModified=false, dataModified=false, remove=t[Topic.MaskType.remove];
+      if(t.parent==null || remove) {
         parentPos=0;
       } else if(_tr.TryGetValue(t.parent, out rec)) {
         parentPos=rec.pos;
@@ -230,12 +231,22 @@ namespace X13 {
         return;  // parent is unknown
       }
       if(!_tr.TryGetValue(t, out rec)) {
+        if(remove) {
+          return;
+        }
         oldFl_Size=0;
         oldDataSize=0;
         rec=new Record(t, parentPos);
         recModified=true;
         dataModified=true;
         _tr[t]=rec;
+      } else if(remove) {
+        if(rec.saved==FL_SAVED_E && rec.data_pos>0 && rec.data_size>0) {
+          AddFree(rec.data_pos, rec.data_size);
+        }
+        AddFree(rec.pos, rec.size);
+        _tr.Remove(t);
+        return;
       } else {
         oldFl_Size=rec.fl_size;
         oldDataSize=rec.data_size+6;
@@ -248,7 +259,7 @@ namespace X13 {
           recModified=true;
         }
         rec.fl_size=FL_RECORD | (uint)(14+Encoding.UTF8.GetByteCount(rec.name));
-        if(t.saved) {
+        if(t[Topic.MaskType.saved]) {
           if(rec.data!=t.GetJson()) {
             rec.data=t.GetJson();
             dataModified=true;
@@ -323,7 +334,7 @@ namespace X13 {
     }
     private void AddTopic(Topic t, Record r) {
       if(r.saved!=0) {
-        t.saved=true;
+        t[Topic.MaskType.saved]=true;
         if(r.saved==FL_SAVED_E) {
           byte[] lBuf=new byte[4];
           _file.Position=(long)r.data_pos<<3;
@@ -424,7 +435,7 @@ namespace X13 {
     }
     public static string LongToString(long value, string baseChars=null) {
       if(string.IsNullOrEmpty(baseChars)) {
-        baseChars="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx";
+        baseChars="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
       }
       int i = 64;
       char[] buffer = new char[i];
@@ -493,7 +504,7 @@ namespace X13 {
         this.parent=parent;
         name=t.name;
         fl_size=FL_RECORD | (uint)(14+Encoding.UTF8.GetByteCount(name));
-        if(t.saved) {
+        if(t[Topic.MaskType.saved]) {
           data=t.GetJson();
           data_size=(data==null?0:Encoding.UTF8.GetByteCount(data));
           if(data_size>0 && data_size<16) {
