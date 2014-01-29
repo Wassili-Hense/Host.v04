@@ -32,6 +32,7 @@ namespace X13.PLC {
         add.Register('B', Decl.ip);
         add.Register('C', Decl.ip | Decl.optional);
         add.Register('Q', Decl.op, {'pos':1});
+        return add;
       })();";
 
       engine.Execute(add);
@@ -39,7 +40,7 @@ namespace X13.PLC {
       DeclInstance.funcs[0].Init(test);
       Topic.Process();
       test.Get("A").value=1;
-      test.Get("B").value=Math.PI;
+      test.Get("B").value=3;
       Topic.Process();
 
       //engine.Execute("var testAdd=new PLC.Add('/test');");
@@ -51,7 +52,6 @@ namespace X13.PLC {
       //engine.Execute("topics['/l1_1/l1_2']=topics['/l1_1'].Get('l2_1');");
       //engine.Execute("root.Callback(function(){ console.log('run');});");
       //var topics=engine.GetGlobalValue("topics");
-      //string json=JSONObject.Stringify(engine, topics);
       //JSONObject.Parse
       //JSONObject.Stringify
     }
@@ -81,13 +81,6 @@ namespace X13.PLC {
     [JSFunction(Name = "Get")]
     public JuTopic Get(string name) {
       return new JuTopic(base.Engine, _ref.Get(name, true));
-    }
-    [JSFunction]
-    public void Callback(ObjectInstance f) {
-      var func=(f as FunctionInstance);
-      if(func!=null) {
-        func.Call(null);
-      }
     }
   }
 
@@ -149,7 +142,7 @@ namespace X13.PLC {
     [JSProperty(Name = "Deinit")]
     public FunctionInstance DeinitFunc { get; set; }
     public void Init(Topic owner) {
-      if(InitFunc==null){
+      if(InitFunc==null) {
         return;
       }
       var inst=InitFunc.Engine.CallGlobalFunction<ObjectInstance>("CreateBlock", this.InitFunc, owner.path);
@@ -187,7 +180,12 @@ namespace X13.PLC {
           return;
         }
         if((_pins[idx].flags & Flags.input)==Flags.input) {
-          inst.SetPropertyValue(_pins[idx].name, t.value, true);
+          if(t.value is DateTime) {
+            var jsDate=inst.Engine.Date.Construct(((DateTime)t.value).ToUniversalTime().Subtract(new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds);
+            inst.SetPropertyValue(_pins[idx].name, jsDate, true);
+          } else {
+            inst.SetPropertyValue(_pins[idx].name, t.value, true);
+          }
         }
         if(CalcFunc!=null) {
           CalcFunc.Call(inst, t.name);
