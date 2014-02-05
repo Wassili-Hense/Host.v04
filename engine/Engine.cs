@@ -8,7 +8,6 @@ namespace X13 {
     static void Main(string[] args) {
       X13.PLC.PLC plc=new PLC.PLC();
       plc.Test();
-      Console.ReadLine();
     }
   }
 }
