@@ -6,7 +6,6 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "bin", "bin", "{780EF7E3-AF84-42E0-9013-CFFA0E26362D}"
 	ProjectSection(SolutionItems) = preProject
 		bin\Jurassic.dll = bin\Jurassic.dll
-		bin\Newtonsoft.Json.dll = bin\Newtonsoft.Json.dll
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "engine.UT", "engine.UT\engine.UT.csproj", "{DA63882D-C9BD-400D-ABA4-2EE32ED4E0F1}"

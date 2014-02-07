@@ -7,12 +7,14 @@ using System.Text;
 
 namespace X13.PLC {
   public class PLC {
-    public ScriptEngine Engine;
+    public static PLC instance { get; private set; }
+    private ScriptEngine Engine;
 
     public PLC() {
       Engine = new ScriptEngine();
+      instance=this;
     }
-    public void Parse(Topic dst, string json) {
+    public object Parse(Topic dst, string json) {
       object o=JSONObject.Parse(Engine, json);
       ObjectInstance jo=o as ObjectInstance;
       string jo_class;
@@ -70,18 +72,17 @@ namespace X13.PLC {
                 break;
               }
             }
-            DeclInstance.functions[di._name]=di;
+            DeclInstance.funcs[di._name]=di;
+            return di;
           }
-          break;
         #endregion declarer
         #region function
         case "function": {
             string jo_decl;
             if((jo_decl=jo.GetPropertyValue("declarer") as string)!=null) {
               DeclInstance decl;
-              if(DeclInstance.functions.TryGetValue(jo_decl, out decl)){
-                dst.value=new FuncInst(Engine, decl);
-                return;
+              if(DeclInstance.funcs.TryGetValue(jo_decl, out decl) && decl!=null){
+                return new FuncInst(Engine, decl);
               } else {
                 Log.Warning("{0}[{1}] - unknown declarer", dst.path, jo_decl);
               }
@@ -91,7 +92,14 @@ namespace X13.PLC {
         #endregion function
         }
       }
-      dst.value=o;
+      return o;
+    }
+    public string ToJson(Topic t) {
+      IToJson tj;
+      if((tj=t.value as IToJson)!=null) {
+        return tj.ToJson();
+      }
+      return JSONObject.Stringify(Engine, t.value);
     }
     public void Test() {
       string add_json="{"
@@ -102,14 +110,14 @@ namespace X13.PLC {
         +"\"C\":{ \"type\":5, \"pos\":3},"
         +"\"Q\":{ \"type\":2, \"pos\":1}"
         +"}";
-      Parse(Topic.root.Get("/var/test"), "1");
-      Parse(Topic.root.Get("/etc/declarer/func/Add"), add_json);
+      Topic.root.Get("/var/test").SetJson("1");
+      Topic.root.Get("/etc/declarer/func/Add").SetJson(add_json);
       var test=Topic.root.Get("/plc/test/A01");
       string a01_json="{"
         +"\"class\":\"function\","
         +"\"declarer\":\"Add\""
         +"}";
-      Parse(test, a01_json);
+      test.SetJson(a01_json);
 
       Topic.Process();
       test.Get("A").value=1;
@@ -118,15 +126,25 @@ namespace X13.PLC {
       test.Get("C").value=9;
       Topic.Process();
 
-      string json=JSONObject.Stringify(Engine, Topic.root.Get("/etc/declarer/func/Add").value);
+      string json=Topic.root.Get("/etc/declarer/func/Add").GetJson();
       Log.Debug("{0}", json);
-      json=JSONObject.Stringify(Engine, test.value);
+      Topic.root.Get("/etc/declarer/func/Add1").SetJson(json);
+      json=test.GetJson();
       Log.Debug("{0}", json);
+      var a02=Topic.root.Get("/plc/test/A02");
+      a02.SetJson(json);
+
+      Topic.Process();
+      a02.Get("A").value=4;
+      a02.Get("B").value=12;
+      Topic.Process();
+      a02.Get("C").value=26;
+      Topic.Process();
 
     }
   }
-  public class DeclInstance {
-    public static Dictionary<string, DeclInstance> functions=new Dictionary<string, DeclInstance>();
+  public class DeclInstance : IToJson {
+    public static readonly Dictionary<string, DeclInstance> funcs=new Dictionary<string, DeclInstance>();
     public List<PinDecl> _pins;
     public string _name;
 
@@ -148,9 +166,33 @@ namespace X13.PLC {
       public Flags flags;
       public int pos;
     }
+    public string ToJson() {
+      StringBuilder sb=new StringBuilder();
+      sb.Append("{");
+      sb.Append("\"class\":\"declarer\"");
+      if(InitFunc!=null) {
+        sb.Append(",\"Init\":\""+(InitFunc as UserDefinedFunction).BodyText+"\"");
+      }
+      if(CalcFunc!=null) {
+        sb.Append(",\"Calc\":\""+(CalcFunc as UserDefinedFunction).BodyText+"\"");
+      }
+      if(DeinitFunc!=null) {
+        sb.Append(",\"Deinit\":\""+(DeinitFunc as UserDefinedFunction).BodyText+"\"");
+      }
+      for(int i=0; i<_pins.Count; i++) {
+        sb.Append(",\""+_pins[i].name+"\":{");
+        sb.Append("\"type\":"+((int)_pins[i].flags).ToString());
+        if(_pins[i].pos>0) {
+          sb.Append(",\"pos\":"+_pins[i].pos.ToString());
+        }
+        sb.Append("}");
+      }
+      sb.Append("}");
+      return sb.ToString();
+    }
   }
 
-  public class FuncInst : ObjectInstance, ITenant {
+  public class FuncInst : ObjectInstance, ITenant, IToJson {
     private Topic _owner;
     private DeclInstance _decl;
 
@@ -226,6 +268,10 @@ namespace X13.PLC {
         }
         return Undefined.Value;
       }
+    }
+
+    public string ToJson() {
+      return string.Concat("{\"class\":\"function\", \"declarer\":\"", _decl._name, "\"}");
     }
   }
 }

@@ -1,6 +1,4 @@
-﻿using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -13,14 +11,12 @@ namespace X13 {
     public static Func<string, bool, SortedList<string, string>> RequestContext;
     private static SortedList<Topic, object> _prIp;
     private static SortedList<Topic, object> _prOp;
-    private static JsonConverter[] _jcs;
     private static int _busyFlag;
 
     static Topic() {
       _prIp=new SortedList<Topic, object>();
       _prOp=new SortedList<Topic, object>();
       root=new Topic(null, "/");
-      _jcs=new JsonConverter[] { new Newtonsoft.Json.Converters.JavaScriptDateTimeConverter() };
       _busyFlag=1;
     }
     public static void Process() {
@@ -73,7 +69,7 @@ namespace X13 {
         _path="/";
       } else if(parent==root) {
         _path="/"+name;
-      }else{
+      } else {
         _path=parent.path+"/"+name;
       }
       _subs=new List<Tuple<MaskType, Action<Topic, TopicArgs>>>();
@@ -286,136 +282,15 @@ namespace X13 {
       }
     }
     internal void SetJson(string json) {
-      bool ch=false;
-      object tmp=null;
-      if(string.IsNullOrWhiteSpace(json)) {
-        tmp=null; // TODO: Remove
-      } else if(json[0]=='{') {
-        JObject o=JObject.Parse(json);
-        JToken jDesc;
-        if(o.TryGetValue("+", out jDesc)) {
-          string type=jDesc.ToObject<string>();
-          if(type=="Topic") {
-            JToken jt1;
-            if(o.TryGetValue("p", out jt1)) {
-              string t1=jt1.Value<string>();
-              if(t1.StartsWith("../")) {
-                Topic mop=this;
-                while(t1.StartsWith("../")) {
-                  t1=t1.Substring(3);
-                  mop=mop.parent;
-                }
-                t1=mop.path+"/"+t1;
-              }
-              tmp=this.Get(t1, null);
-            } else {
-              Type tt=Type.GetType(type);
-              if(tt==null) {
-                tmp=o;
-              } else if(tt.IsEnum) {
-                JToken v;
-                if(o.TryGetValue("v", out v)) {
-                  tmp=o.ToObject(tt);
-                }
-              } else {
-                o.Remove("+");
-                if(o.Count>0) {
-                  if(_value==null || _value.GetType()!=tt) {
-                    tmp=o.ToObject(tt);
-                  } else {
-                    tmp=_value;
-                    JsonConvert.PopulateObject(o.ToString(), tmp);
-                    ch=true;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }else if(json.StartsWith("new Date(")) {
-        tmp=JsonConvert.DeserializeObject<DateTime>(json, _jcs).ToLocalTime();
-      }else{
-        tmp=JsonConvert.DeserializeObject(json);
-      }
-      if(!ch && !object.Equals(tmp, _value)) {
-        ITenant tt;
-        if((tt=_value as ITenant)!=null) {
-          tt.owner=null;
-        }
-        ch=true;
-      }
-      if(ch) {
-        _value=tmp;
-        _flags|=MaskType.changed;
-      }
+      //TODO: Remove
+      _prIp[this]=PLC.PLC.instance.Parse(this, json);
     }
     internal string GetJson() {
       if(_json==null) {
         lock(this) {
           if(_json==null) {
             try {
-              Type valueType=_value==null?null:_value.GetType();
-              if(valueType==null) {
-                _json="null";
-              } else if(Type.GetTypeCode(valueType)!=TypeCode.Object) {
-                if(valueType.IsEnum) {
-                  _json=(new JObject(
-                    new JProperty("v", JsonConvert.SerializeObject(_value)),
-                    new JProperty("+", valueType.FullName))).ToString();
-                } else if(valueType==typeof(string) && string.IsNullOrEmpty((string)_value)) {
-                  _json="\"\"";
-                } else {
-                  _json=JsonConvert.SerializeObject(_value, _jcs);
-                }
-              } else if(valueType==typeof(Topic)) {
-                Topic link=this._value as Topic;
-                if(link==null) {
-                  _json=(new JObject(new JProperty("+", "Topic"))).ToString();
-                } else {
-                  string sPath=link.path;
-                  Stack<Topic> mPath=new Stack<Topic>();
-                  Topic cur=this;
-                  do {
-                    mPath.Push(cur);
-                  } while((cur=cur.parent)!=root);
-                  Stack<Topic> lPath=new Stack<Topic>();
-                  cur=link;
-                  do {
-                    lPath.Push(cur);
-                  } while((cur=cur.parent)!=root);
-                  while(mPath.Peek()==lPath.Peek()) {
-                    mPath.Pop();
-                    lPath.Pop();
-                  }
-                  if(mPath.Count<3) {
-                    StringBuilder sb=new StringBuilder();
-                    for(int i=mPath.Count-1; i>=0; i--) {
-                      sb.Append("../");
-                    }
-                    while(lPath.Count>0) {
-                      if(lPath.Count>1) {
-                        sb.AppendFormat("{0}/", lPath.Pop().name);
-                      } else {
-                        sb.AppendFormat(lPath.Pop().name);
-                      }
-                    }
-                    sPath=sb.ToString();
-                  }
-                  _json=(new JObject(
-                    new JProperty("p", sPath),
-                    new JProperty("+", "Topic"))).ToString();
-                }
-              } else {
-                JObject o;
-                if(valueType==typeof(JObject)) {
-                  o=_value as JObject;
-                } else {
-                  o=JObject.FromObject(_value);
-                  o["+"]=valueType.FullName;
-                }
-                _json=o.ToString();
-              }
-
+              _json=PLC.PLC.instance.ToJson(this);
             }
             catch(Exception ex) {
               Log.Error("{0}.ToJson() val={1}, err={2}", this.path, _value, ex.Message);
@@ -536,5 +411,8 @@ namespace X13 {
 
   public interface ITenant {
     Topic owner { get; set; }
+  }
+  public interface IToJson {
+    string ToJson();
   }
 }
